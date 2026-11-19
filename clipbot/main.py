@@ -4,6 +4,7 @@
   python -m clipbot check            kolla en gång vilka streamers som är live (testar API-nycklarna)
   python -m clipbot accounts         lista kontona i Post for Me (för POSTFORME_ACCOUNT_IDS)
   python -m clipbot analyze <fil>    testa klippningen på en egen videofil (ingen chatt)
+  python -m clipbot logg             visa analysraderna och felen från senaste körningarna
 """
 from __future__ import annotations
 
@@ -87,9 +88,13 @@ async def run(cfg: Config) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     argv = sys.argv[1:] if argv is None else argv
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     load_dotenv()
     cfg = Config.from_env()
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if not argv or argv[0] == "run":
+        cfg.data_dir.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(cfg.data_dir / "clipbot.log", encoding="utf-8"))
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", handlers=handlers)
     cmd = argv[0] if argv else "run"
 
     if cmd == "run":
@@ -103,6 +108,15 @@ def main(argv: list[str] | None = None) -> None:
     elif cmd == "accounts":
         for acc in PostForMe(cfg).accounts():
             print(f"{acc.get('id')}  {acc.get('platform')}  {acc.get('username') or acc.get('name', '')}")
+    elif cmd == "logg":
+        path = cfg.data_dir / "clipbot.log"
+        if not path.exists():
+            print("Ingen logg än. Den skapas när du kör: python -m clipbot run")
+            return
+        keep = ("analyserad", "Nytt klipp", "ERROR", "WARNING", "Spelar in", "Bevakar")
+        lines = [l.rstrip() for l in path.read_text(encoding="utf-8", errors="ignore").splitlines()
+                 if any(k in l for k in keep)]
+        print("\n".join(lines[-40:]) or "Inga analysrader än.")
     elif cmd == "analyze" and len(argv) > 1:
         analyze_file(cfg, Path(argv[1]))
     else:
