@@ -55,8 +55,9 @@ async def run(cfg: Config) -> None:
                 log.error("Kunde inte skicka klipp till Discord: %s", exc)
 
     sessions: dict[str, tuple[Session, asyncio.Task]] = {}
-    log.info("Bevakar %d streamers, kollar var %d s%s", len(streamers), cfg.poll_interval_sec,
-             " (TORRKÖRNING)" if cfg.dry_run else "")
+    mode = "gratisläge: du laddar upp i TikTok själv" if cfg.manual_publishing else (
+        "Post for Me" + (" (TORRKÖRNING)" if cfg.dry_run else ""))
+    log.info("Bevakar %d streamers, kollar var %d s. Publicering: %s", len(streamers), cfg.poll_interval_sec, mode)
     while True:
         live: dict[str, LiveInfo] = await asyncio.to_thread(checker.check, streamers)
         for key, info in live.items():

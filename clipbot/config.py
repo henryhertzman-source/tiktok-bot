@@ -88,6 +88,7 @@ class Config:
     postforme_api_key: str | None = None
     postforme_account_ids: list[str] = field(default_factory=list)
     postforme_base_url: str = "https://api.postforme.dev"
+    publish_mode: str = "auto"   # auto | manual | postforme
 
     # Claude (valfritt: bildtexter)
     anthropic_api_key: str | None = None
@@ -113,6 +114,16 @@ class Config:
     hype_emotes: list[str] = field(default_factory=list)
     vertical: bool = True
 
+    @property
+    def manual_publishing(self) -> bool:
+        """Gratisläget: Godkänn skickar en TikTok-färdig fil till Discord, du laddar upp själv.
+        auto = manuellt tills POSTFORME_API_KEY och POSTFORME_ACCOUNT_IDS finns."""
+        if self.publish_mode == "manual":
+            return True
+        if self.publish_mode == "postforme":
+            return False
+        return not (self.postforme_api_key and self.postforme_account_ids)
+
     @classmethod
     def from_env(cls) -> "Config":
         channel = _env("DISCORD_CHANNEL_ID")
@@ -128,6 +139,7 @@ class Config:
             postforme_api_key=_env("POSTFORME_API_KEY"),
             postforme_account_ids=_list("POSTFORME_ACCOUNT_IDS", ""),
             postforme_base_url=_env("POSTFORME_BASE_URL", "https://api.postforme.dev"),
+            publish_mode=(_env("PUBLISH_MODE", "auto") or "auto").lower(),
             anthropic_api_key=_env("ANTHROPIC_API_KEY"),
             claude_model=_env("CLAUDE_MODEL", "claude-opus-5-5"),
             data_dir=Path(_env("DATA_DIR", "data")),

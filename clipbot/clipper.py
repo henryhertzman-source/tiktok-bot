@@ -71,3 +71,32 @@ def make_preview(clip: Path, out: Path) -> Path:
         if out.stat().st_size <= DISCORD_MAX_BYTES:
             break
     return out
+
+
+def _duration(path: Path) -> float:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    return float(out or 0) or 60.0
+
+
+def make_upload_file(clip: Path, out: Path, max_bytes: int = DISCORD_MAX_BYTES) -> Path:
+    """TikTok-färdig fil (720x1280) som ryms i Discord, för att ladda upp själv i TikTok-appen.
+
+    Bitraten räknas fram ur klippets längd så att filen hamnar under Discords gräns.
+    """
+    duration = _duration(clip)
+    audio_kbps = 96
+    budget = 0.92
+    for _ in range(3):
+        video_kbps = int(max_bytes * 8 / 1000 / duration * budget) - audio_kbps
+        video_kbps = max(300, min(video_kbps, 4500))
+        _run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(clip), "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+              "-c:v", "libx264", "-preset", "medium", "-b:v", f"{video_kbps}k", "-maxrate", f"{video_kbps}k",
+              "-bufsize", f"{video_kbps * 2}k", "-c:a", "aac", "-b:a", f"{audio_kbps}k",
+              "-movflags", "+faststart", str(out)])
+        if out.stat().st_size <= max_bytes:
+            break
+        budget *= 0.85
+    return out

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import discord
 
+from .clipper import make_upload_file
 from .config import Config
 from .postforme import PostForMe
 from .store import Clip, ClipStore
@@ -28,9 +29,10 @@ def clip_text(clip: Clip) -> str:
     )
 
 
-def buttons(clip_id: str) -> discord.ui.View:
+def buttons(clip_id: str, manual: bool = False) -> discord.ui.View:
     view = discord.ui.View(timeout=None)
-    view.add_item(discord.ui.Button(label="Godkänn och publicera", style=discord.ButtonStyle.success, custom_id=f"approve:{clip_id}"))
+    label = "Godkänn – ge mig TikTok-filen" if manual else "Godkänn och publicera"
+    view.add_item(discord.ui.Button(label=label, style=discord.ButtonStyle.success, custom_id=f"approve:{clip_id}"))
     view.add_item(discord.ui.Button(label="Avvisa", style=discord.ButtonStyle.danger, custom_id=f"reject:{clip_id}"))
     return view
 
@@ -66,7 +68,7 @@ class ClipBot(discord.Client):
             return
         preview = Path(clip.preview)
         file = discord.File(preview) if preview.exists() else None
-        msg = await ch.send(clip_text(clip), file=file, view=buttons(clip.id))
+        msg = await ch.send(clip_text(clip), file=file, view=buttons(clip.id, self.cfg.manual_publishing))
         self.store.update(clip.id, discord_message_id=msg.id)
 
     async def on_interaction(self, interaction: discord.Interaction) -> None:
@@ -88,22 +90,37 @@ class ClipBot(discord.Client):
             return
 
         self.store.update(clip_id, status="approved")
-        await interaction.response.edit_message(content=clip_text(clip) + "\n\n⏳ Publicerar …", view=None)
-        result = await asyncio.to_thread(self.publish, clip)
+        waiting = "⏳ Gör filen klar för TikTok …" if self.cfg.manual_publishing else "⏳ Publicerar …"
+        await interaction.response.edit_message(content=clip_text(clip) + f"\n\n{waiting}", view=None)
+        result, upload = await asyncio.to_thread(self.publish, clip)
         await interaction.edit_original_response(content=clip_text(clip) + f"\n\n{result}")
+        if upload:
+            await interaction.followup.send(
+                content=f"📲 **Ladda upp i TikTok:** spara videon, öppna TikTok → **+** → **Ladda upp**.\n"
+                        f"Kopiera bildtexten:\n```\n{clip.caption}\n```",
+                file=discord.File(upload),
+            )
 
-    def publish(self, clip: Clip) -> str:
+    def publish(self, clip: Clip) -> tuple[str, Path | None]:
+        """Returnerar (statusrad, fil att skicka i Discord eller None)."""
+        if self.cfg.manual_publishing:
+            try:
+                src = Path(clip.path)
+                upload = make_upload_file(src, src.with_name(src.stem + "_tiktok.mp4"))
+                self.store.update(clip.id, status="posted", post_result="manuell uppladdning")
+                return "✅ Godkänt. Filen kommer här under – ladda upp den själv i TikTok (gratisläget).", upload
+            except Exception as exc:
+                log.error("Kunde inte göra TikTok-fil för %s: %s", clip.id, exc)
+                self.store.update(clip.id, status="failed", post_result=str(exc)[:200])
+                return f"⚠️ Kunde inte göra filen: {exc}", None
         if self.cfg.dry_run:
             self.store.update(clip.id, status="posted", post_result="dry-run")
-            return "🧪 Torrkörning (DRY_RUN=true): skulle ha publicerats nu. Inget skickades."
-        if not self.poster.configured:
-            self.store.update(clip.id, status="failed", post_result="Post for Me saknar nyckel/konton")
-            return "⚠️ POSTFORME_API_KEY eller POSTFORME_ACCOUNT_IDS saknas – inget publicerat."
+            return "🧪 Torrkörning (DRY_RUN=true): skulle ha publicerats via Post for Me nu. Inget skickades.", None
         try:
             res = self.poster.post(Path(clip.path), clip.caption)
             self.store.update(clip.id, status="posted", post_result=str(res.get("id", res))[:200])
-            return f"✅ Skickat till Post for Me (inlägg {res.get('id', '?')})."
+            return f"✅ Skickat till Post for Me (inlägg {res.get('id', '?')}).", None
         except Exception as exc:
             log.error("Publicering misslyckades för %s: %s", clip.id, exc)
             self.store.update(clip.id, status="failed", post_result=str(exc)[:200])
-            return f"⚠️ Publiceringen misslyckades: {exc}"
+            return f"⚠️ Publiceringen misslyckades: {exc}", None

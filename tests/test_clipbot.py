@@ -7,7 +7,7 @@ from pathlib import Path
 
 from clipbot import analysis
 from clipbot.chat import ChatLog, parse_irc_privmsg, parse_kick_event
-from clipbot.clipper import chunks_for, clip_window, cut_clip
+from clipbot.clipper import DISCORD_MAX_BYTES, chunks_for, clip_window, cut_clip, make_upload_file
 from clipbot.config import Config, Streamer, load_streamers
 from clipbot.platforms import parse_kick_channels, parse_twitch_streams, parse_youtube_live_page
 from clipbot.recorder import Chunk, read_segment_list
@@ -136,6 +136,11 @@ class ConfigAndStore(unittest.TestCase):
     def test_dry_run_default(self):
         self.assertTrue(Config.from_env().dry_run)
 
+    def test_publish_mode(self):
+        self.assertTrue(Config().manual_publishing)  # ingen Post for Me-nyckel -> gratisläget
+        self.assertFalse(Config(postforme_api_key="k", postforme_account_ids=["a"]).manual_publishing)
+        self.assertTrue(Config(postforme_api_key="k", postforme_account_ids=["a"], publish_mode="manual").manual_publishing)
+
     def test_store_roundtrip(self):
         with tempfile.TemporaryDirectory() as d:
             store = ClipStore(Path(d) / "clips.json")
@@ -187,6 +192,26 @@ class EndToEndVideo(unittest.TestCase):
             info = json.loads(probe.stdout)
             self.assertEqual((info["streams"][0]["width"], info["streams"][0]["height"]), (1080, 1920))
             self.assertAlmostEqual(float(info["format"]["duration"]), end - start, delta=1.5)
+
+
+@unittest.skipUnless(HAS_FFMPEG, "ffmpeg saknas")
+class UploadFile(unittest.TestCase):
+    def test_long_detailed_clip_fits_discord(self):
+        """Ett 60 s 1080x1920-klipp med mycket rörelse ska ändå bli en 720x1280-fil under Discords gräns."""
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "clip.mp4"
+            subprocess.run([
+                "ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "mandelbrot=size=1080x1920:rate=30",
+                "-f", "lavfi", "-i", "anoisesrc=d=60", "-t", "60", "-c:v", "libx264", "-preset", "ultrafast",
+                "-crf", "18", "-c:a", "aac", str(src),
+            ], check=True)
+            out = make_upload_file(src, Path(d) / "up.mp4")
+            self.assertLessEqual(out.stat().st_size, DISCORD_MAX_BYTES)
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                 "-of", "csv=p=0", str(out)], capture_output=True, text=True, check=True,
+            )
+            self.assertEqual(probe.stdout.strip(), "720,1280")
 
 
 if __name__ == "__main__":
