@@ -35,22 +35,34 @@ async def run(cfg: Config) -> None:
         from .discord_bot import ClipBot
 
         bot = ClipBot(cfg, store)
-        asyncio.create_task(bot.start(cfg.discord_token))
+
+        def _bot_stopped(task: asyncio.Task) -> None:
+            if not task.cancelled() and task.exception():
+                log.error("Discord-boten kunde inte logga in: %s. Kontrollera DISCORD_BOT_TOKEN i .env.",
+                          task.exception())
+
+        bot_task = asyncio.create_task(bot.start(cfg.discord_token))
+        bot_task.add_done_callback(_bot_stopped)
     else:
         log.warning("DISCORD_BOT_TOKEN/DISCORD_CHANNEL_ID saknas: klippen sparas i %s men kan inte godkännas", cfg.data_dir)
 
     async def notify(text: str) -> None:
         log.info(text)
         if bot:
-            try:
-                await bot.notify(text)
+            try:  # Discord får aldrig blockera inspelningen
+                await asyncio.wait_for(bot.notify(text), timeout=30)
+            except asyncio.TimeoutError:
+                log.error("Discord svarar inte (är boten inloggad?). Notisen hoppades över.")
             except Exception as exc:
                 log.error("Discord-notis misslyckades: %s", exc)
 
     async def on_clip(clip: Clip) -> None:
         if bot:
             try:
-                await bot.send_clip(clip)
+                await asyncio.wait_for(bot.send_clip(clip), timeout=120)
+            except asyncio.TimeoutError:
+                log.error("Discord svarar inte. Klippet %s finns i %s och skickas när boten är inloggad.",
+                          clip.id, clip.path)
             except Exception as exc:
                 log.error("Kunde inte skicka klipp till Discord: %s", exc)
 
