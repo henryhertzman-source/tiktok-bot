@@ -1,0 +1,5 @@
+requests>=2.31
+streamlink>=7.0
+discord.py>=2.4
+websockets>=13.0
+anthropic>=2.8

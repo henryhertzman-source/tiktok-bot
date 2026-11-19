@@ -1,0 +1,5 @@
+[
+  {"platform": "twitch",  "channel": "twitch_login_har",    "name": "Visningsnamn"},
+  {"platform": "kick",    "channel": "kick_slug_har",       "name": "Visningsnamn"},
+  {"platform": "youtube", "channel": "@youtube_handle_har", "name": "Visningsnamn"}
+]
