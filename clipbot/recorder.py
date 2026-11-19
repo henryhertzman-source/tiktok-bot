@@ -11,6 +11,7 @@ import csv
 import logging
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +41,15 @@ def read_segment_list(list_file: Path, folder: Path) -> list[Chunk]:
     return chunks
 
 
+def find_tool(name: str) -> str | None:
+    """Letar i PATH och i samma mapp som Python (t.ex. .venv/bin), där pip lägger streamlink."""
+    found = shutil.which(name)
+    if found:
+        return found
+    local = Path(sys.executable).parent / name
+    return str(local) if local.exists() else None
+
+
 class Recorder:
     def __init__(self, url: str, folder: Path, quality: str, chunk_seconds: int):
         self.url = url
@@ -47,20 +57,21 @@ class Recorder:
         self.quality = quality
         self.chunk_seconds = chunk_seconds
         self.list_file = folder / "chunks.csv"
+        self.log_file = folder / "streamlink.log"
         self.started_at = 0.0   # unix-tid då inspelningen startade (för att para ihop chatten)
         self._streamlink: subprocess.Popen | None = None
         self._ffmpeg: subprocess.Popen | None = None
 
     @staticmethod
     def check_tools() -> list[str]:
-        return [t for t in ("streamlink", "ffmpeg", "ffprobe") if shutil.which(t) is None]
+        return [t for t in ("streamlink", "ffmpeg", "ffprobe") if find_tool(t) is None]
 
     def start(self) -> None:
         self.folder.mkdir(parents=True, exist_ok=True)
         self._streamlink = subprocess.Popen(
-            ["streamlink", "--stdout", "--twitch-disable-ads", "--retry-streams", "10", "--retry-max", "5",
+            [find_tool("streamlink") or "streamlink", "--stdout", "--retry-streams", "10", "--retry-max", "5",
              self.url, self.quality],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=self.log_file.open("ab"),
         )
         self._ffmpeg = subprocess.Popen(
             ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-map", "0:v:0?", "-map", "0:a:0?",
@@ -87,6 +98,12 @@ class Recorder:
                 self._ffmpeg.terminate()
                 self._ffmpeg.wait(timeout=10)
         log.info("Inspelningen stoppad: %s", self.folder)
+
+    def log_tail(self, lines: int = 5) -> str:
+        if not self.log_file.exists():
+            return ""
+        text = self.log_file.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
+        return "\n".join(text[-lines:])
 
     def chunks(self) -> list[Chunk]:
         return read_segment_list(self.list_file, self.folder)

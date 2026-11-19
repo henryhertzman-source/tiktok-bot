@@ -88,6 +88,9 @@ class Session:
                 pass
         await asyncio.to_thread(rec.stop)
         await self._process(rec, analyzed, pending, final=True)
+        if not rec.chunks() and not analyzed:
+            log.error("%s: inspelningen gav ingen video. Streamlink sa:\n%s",
+                      self.info.streamer.display, rec.log_tail() or "(inget)")
 
     async def _process(self, rec: Recorder, analyzed: set[str], pending: list[PendingCut], final: bool) -> None:
         chunks = rec.chunks()  # ffmpeg listar bara färdiga bitar
