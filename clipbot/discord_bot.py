@@ -11,7 +11,7 @@ from pathlib import Path
 
 import discord
 
-from .clipper import make_upload_file
+from .clipper import DISCORD_MAX_BYTES, make_upload_file
 from .config import Config
 from .postforme import PostForMe
 from .store import Clip, ClipStore
@@ -106,7 +106,9 @@ class ClipBot(discord.Client):
         if self.cfg.manual_publishing:
             try:
                 src = Path(clip.path)
-                upload = make_upload_file(src, src.with_name(src.stem + "_tiktok.mp4"))
+                # Klippet görs redan TikTok-färdigt i gratisläget; gör bara om det om filen är för stor.
+                upload = src if src.stat().st_size <= DISCORD_MAX_BYTES else make_upload_file(
+                    src, src.with_name(src.stem + "_tiktok.mp4"))
                 self.store.update(clip.id, status="posted", post_result="manuell uppladdning")
                 return "✅ Godkänt. Filen kommer här under – ladda upp den själv i TikTok (gratisläget).", upload
             except Exception as exc:

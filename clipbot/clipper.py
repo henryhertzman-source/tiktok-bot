@@ -13,12 +13,21 @@ from .recorder import Chunk
 
 DISCORD_MAX_BYTES = 9_500_000  # Discords gräns för uppladdning utan Nitro är 10 MB
 
-VERTICAL_FILTER = (
-    "[0:v]split=2[a][b];"
-    "[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:2[bg];"
-    "[b]scale=1080:-2[fg];"
-    "[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]"
-)
+
+
+def vertical_filter(width: int = 1080, height: int = 1920) -> str:
+    """9:16 med suddig bakgrund. Bakgrunden suddas i liten storlek och skalas upp,
+    vilket är mångdubbelt snabbare än att sudda i full storlek (viktigt på svaga datorer)."""
+    bw, bh = width // 4, height // 4
+    return (
+        "[0:v]split=2[a][b];"
+        f"[a]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},boxblur=8:1,scale={width}:{height}[bg];"
+        f"[b]scale={width}:-2[fg];"
+        "[bg][fg]overlay=(W-w)/2:(H-h)/2,fps=30,format=yuv420p[v]"
+    )
+
+
+VERTICAL_FILTER = vertical_filter()
 
 
 def clip_window(peak_abs: float, pre: float, post: float, rec_end: float | None = None) -> tuple[float, float]:
@@ -39,7 +48,14 @@ def _run(cmd: list[str]) -> None:
         raise RuntimeError(f"ffmpeg misslyckades: {proc.stderr[-800:]}")
 
 
-def cut_clip(chunks: list[Chunk], start: float, end: float, out: Path, vertical: bool = True) -> Path:
+def video_kbps_for(duration: float, max_bytes: int, audio_kbps: int, budget: float = 0.92) -> int:
+    kbps = int(max_bytes * 8 / 1000 / max(duration, 1.0) * budget) - audio_kbps
+    return max(300, min(kbps, 4500))
+
+
+def cut_clip(chunks: list[Chunk], start: float, end: float, out: Path, vertical: bool = True,
+             size: tuple[int, int] = (1080, 1920), preset: str = "superfast", max_bytes: int | None = None) -> Path:
+    """Klipper ut start–end. Med max_bytes styrs bitraten så att filen ryms (t.ex. i Discord)."""
     parts = chunks_for(chunks, start, end)
     if not parts:
         raise ValueError(f"Ingen inspelning täcker {start:.0f}–{end:.0f} s")
@@ -49,14 +65,28 @@ def cut_clip(chunks: list[Chunk], start: float, end: float, out: Path, vertical:
             fh.write(f"file '{c.path.resolve().as_posix()}'\n")
         concat = fh.name
     offset = max(0.0, start - parts[0].start)
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", concat,
-           "-ss", f"{offset:.2f}", "-t", f"{end - start:.2f}"]
-    if vertical:
-        cmd += ["-filter_complex", VERTICAL_FILTER, "-map", "[v]", "-map", "0:a:0?"]
-    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-c:a", "aac", "-b:a", "128k",
-            "-movflags", "+faststart", str(out)]
+    duration = end - start
+    audio_kbps = 96 if max_bytes else 128
+    budget = 0.92
     try:
-        _run(cmd)
+        for _ in range(3):
+            cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", concat,
+                   "-ss", f"{offset:.2f}", "-t", f"{duration:.2f}"]
+            if vertical:
+                cmd += ["-filter_complex", vertical_filter(*size), "-map", "[v]", "-map", "0:a:0?"]
+            else:
+                cmd += ["-vf", f"scale=-2:{size[1] if size[1] < size[0] else size[0]},fps=30,format=yuv420p"]
+            cmd += ["-c:v", "libx264", "-preset", preset]
+            if max_bytes:
+                kbps = video_kbps_for(duration, max_bytes, audio_kbps, budget)
+                cmd += ["-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{kbps * 2}k"]
+            else:
+                cmd += ["-crf", "21"]
+            cmd += ["-c:a", "aac", "-b:a", f"{audio_kbps}k", "-movflags", "+faststart", str(out)]
+            _run(cmd)
+            if not max_bytes or out.stat().st_size <= max_bytes:
+                break
+            budget *= 0.85
     finally:
         Path(concat).unlink(missing_ok=True)
     return out

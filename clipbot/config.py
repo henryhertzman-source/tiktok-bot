@@ -105,7 +105,7 @@ class Config:
     # Klipp och analys
     clip_pre_sec: float = 40.0
     clip_post_sec: float = 15.0
-    score_threshold: float = 2.5
+    score_threshold: float = 2.0
     max_clips_per_chunk: int = 3
     min_gap_sec: float = 60.0
     weight_chat: float = 1.0
@@ -113,6 +113,7 @@ class Config:
     weight_audio: float = 1.0
     hype_emotes: list[str] = field(default_factory=list)
     vertical: bool = True
+    clip_preset: str = "superfast"   # x264-hastighet: ultrafast/superfast/veryfast (snabbare = större fil)
 
     @property
     def manual_publishing(self) -> bool:
@@ -150,7 +151,7 @@ class Config:
             keep_recordings=_bool("KEEP_RECORDINGS", False),
             clip_pre_sec=_float("CLIP_PRE_SEC", 40.0),
             clip_post_sec=_float("CLIP_POST_SEC", 15.0),
-            score_threshold=_float("SCORE_THRESHOLD", 2.5),
+            score_threshold=_float("SCORE_THRESHOLD", 2.0),
             max_clips_per_chunk=_int("MAX_CLIPS_PER_CHUNK", 3),
             min_gap_sec=_float("MIN_GAP_SEC", 60.0),
             weight_chat=_float("WEIGHT_CHAT", 1.0),
@@ -158,6 +159,7 @@ class Config:
             weight_audio=_float("WEIGHT_AUDIO", 1.0),
             hype_emotes=_list("HYPE_EMOTES", DEFAULT_HYPE),
             vertical=_bool("VERTICAL", True),
+            clip_preset=_env("CLIP_PRESET", "superfast"),
         )
 
 

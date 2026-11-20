@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import sys
 from pathlib import Path
 
@@ -29,6 +30,10 @@ async def run(cfg: Config) -> None:
         raise SystemExit(f"Saknas: {', '.join(missing)}. Installera dem först (se README).")
     streamers = load_streamers(cfg.streamers_file)
     store = ClipStore(cfg.data_dir / "clips.json")
+    old_recordings = cfg.data_dir / "recordings"
+    if not cfg.keep_recordings and old_recordings.exists():
+        shutil.rmtree(old_recordings, ignore_errors=True)  # rester från förra körningen tar bara disk
+        log.info("Rensade gamla inspelningar")
     checker = LiveChecker(cfg)
 
     bot = None

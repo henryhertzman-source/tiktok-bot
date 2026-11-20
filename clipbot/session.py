@@ -12,7 +12,7 @@ from pathlib import Path
 from . import analysis
 from .captions import write_caption
 from .chat import ChatLog, start_chat
-from .clipper import clip_window, cut_clip, make_preview
+from .clipper import DISCORD_MAX_BYTES, clip_window, cut_clip, make_preview
 from .config import Config
 from .platforms import LiveInfo
 from .recorder import Chunk, Recorder
@@ -127,8 +127,15 @@ class Session:
         end = min(cut.end, rec_end) if rec_end else cut.end
         stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(rec.started_at + cut.peak))
         out = self.cfg.data_dir / "clips" / f"{safe_name(s.display)}_{stamp}.mp4"
-        await asyncio.to_thread(cut_clip, chunks, cut.start, end, out, self.cfg.vertical)
-        preview = await asyncio.to_thread(make_preview, out, out.with_name(out.stem + "_preview.mp4"))
+        if self.cfg.manual_publishing:
+            # Gratisläget: EN fil i 720x1280 under Discords gräns = förhandsvisning och TikTok-fil på samma gång.
+            await asyncio.to_thread(cut_clip, chunks, cut.start, end, out, self.cfg.vertical, (720, 1280),
+                                    self.cfg.clip_preset, DISCORD_MAX_BYTES)
+            preview = out
+        else:
+            await asyncio.to_thread(cut_clip, chunks, cut.start, end, out, self.cfg.vertical, (1080, 1920),
+                                    self.cfg.clip_preset)
+            preview = await asyncio.to_thread(make_preview, out, out.with_name(out.stem + "_preview.mp4"))
         wall = rec.started_at + cut.peak
         sample = [m for _, m in self.chat.between(wall - 20, wall + 10)][-40:]
         caption = await asyncio.to_thread(write_caption, self.cfg, s.display, s.platform, self.info.title, cut.reason, sample)
@@ -153,7 +160,7 @@ def analyze_file(cfg: Config, video: Path) -> list[Path]:
     for m in find_moments(cfg, chunk, []):
         start, end = clip_window(m.t, cfg.clip_pre_sec, cfg.clip_post_sec, rec_end=dur)
         out = cfg.data_dir / "clips" / f"test_{int(m.t)}s.mp4"
-        cut_clip([chunk], start, end, out, cfg.vertical)
+        cut_clip([chunk], start, end, out, cfg.vertical, preset=cfg.clip_preset)
         print(f"Topp vid {m.t:.0f} s (poäng {m.score:.1f}: {m.reason}) -> {out}")
         outs.append(out)
     if not outs:
